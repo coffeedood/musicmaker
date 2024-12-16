@@ -1,0 +1,244 @@
+import tkinter as tk
+import threading
+import time
+from mido import Message, MidiFile, MidiTrack, bpm2tempo
+from mido.ports import MultiPort
+from mido import open_output
+import mido
+
+# Define the note intervals and durations for "Für Elise"
+fur_elise_intervals = [
+    0, -1, 0, -1, 0, -12, -7, -8, -15,  # First phrase
+    -24, -12, -15, -13,                 # Second phrase
+    -24, -20, -13, -12,                # Third phrase
+    0, -1, 0, -1, 0, -12, -7, -8, -15   # Repeat of the first phrase
+]
+
+fur_elise_durations = [
+    0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0,  # First phrase
+    0.5, 0.5, 0.5, 1.0,                           # Second phrase
+    0.5, 0.5, 0.5, 1.0,                           # Third phrase
+    0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0  # Repeat of the first phrase
+]
+
+# Define the note intervals and durations for "Laura Palmer Theme"
+laura_palmer_intervals = [
+    0, 2, 4, 5, 7, 9, 11, 12,  # Ascending theme
+    12, 11, 9, 7, 5, 4, 2, 0   # Descending theme
+]
+
+laura_palmer_durations = [
+    1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0,  # Ascending theme
+    1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0   # Descending theme
+]
+
+# Define the 12-bar blues scale
+blues_intervals = [
+    0, 3, 5, 6, 7, 10, 12, 10  # Blues scale intervals (root note + minor pentatonic + blues note)
+]
+
+# 12-bar blues chord progression (each bar lasts 4 beats)
+# Represented as [(root_note, duration_in_bars), ...]
+blues_progression = [
+    (0, 4),  # I chord for 4 bars
+    (5, 2),  # IV chord for 2 bars
+    (0, 2),  # I chord for 2 bars
+    (7, 1),  # V chord for 1 bar
+    (5, 1),  # IV chord for 1 bar
+    (0, 2)   # I chord for 2 bars
+]
+
+# Predefined scales
+scales = {
+    "Gypsy": [0, 2, 3, 6, 7, 8, 11, 12],
+    "Minor Pentatonic": [0, 3, 5, 7, 10, 12],
+    "Major": [0, 2, 4, 5, 7, 9, 11, 12],
+    "Minor": [0, 2, 3, 5, 7, 8, 10, 12],
+    "Chromatic": list(range(13)),  # Chromatic scale includes all 12 semitones
+    "Für Elise": (fur_elise_intervals, fur_elise_durations),
+    "Laura Palmer Theme": (laura_palmer_intervals, laura_palmer_durations),
+    "12-Bar Blues": (blues_intervals, [1.0] * len(blues_intervals))  # Uniform durations for simplicity
+}
+
+def play_blues(port_name, root_note, blues_intervals, blues_progression, tempo_var, volume_var, stop_event):
+    """
+    Play a 12-bar blues progression using the blues scale.
+
+    Args:
+        port_name (str): The name of the MIDI output port.
+        root_note (int): The MIDI number of the root note (e.g., 60 for middle C).
+        blues_intervals (list): The intervals (in semitones) of the blues scale.
+        blues_progression (list): The chord progression for the 12-bar blues.
+        tempo_var (tk.IntVar): The tempo variable (linked to the slider).
+        volume_var (tk.IntVar): The volume variable (linked to the slider).
+        stop_event (threading.Event): Event to signal stopping the loop.
+    """
+    try:
+        with mido.open_output(port_name) as port:
+            print(f"Connected to MIDI output: {port_name}")
+
+            while not stop_event.is_set():
+                for chord_root, duration_bars in blues_progression:
+                    if stop_event.is_set():
+                        break
+
+                    # Play notes in the scale for the duration of the chord
+                    for _ in range(int(duration_bars * 4)):  # 4 beats per bar
+                        for interval in blues_intervals:
+                            if stop_event.is_set():
+                                break
+
+                            note = root_note + chord_root + interval
+                            bpm = tempo_var.get()
+                            volume = volume_var.get()
+                            beat_duration = 60 / bpm
+
+                            # Send note_on message
+                            msg_on = Message('note_on', note=note, velocity=volume, channel=0)
+                            port.send(msg_on)
+
+                            # Hold the note for a short duration
+                            time.sleep(beat_duration * 0.5)
+
+                            # Send note_off message
+                            msg_off = Message('note_off', note=note, velocity=volume, channel=0)
+                            port.send(msg_off)
+
+                            # Rest for the remaining duration
+                            time.sleep(beat_duration * 0.5)
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+def play_scale(port_name, root_note, scale_intervals, note_durations, tempo_var, volume_var, stop_event):
+    """
+    Play a scale or melody on the specified MIDI port with proper durations.
+
+    Args:
+        port_name (str): The name of the MIDI output port.
+        root_note (int): The MIDI number of the root note (e.g., 60 for middle C).
+        scale_intervals (list): The intervals (in semitones) of the melody or scale.
+        note_durations (list): Durations for each note in beats.
+        tempo_var (tk.IntVar): The tempo variable (linked to the slider).
+        volume_var (tk.IntVar): The volume variable (linked to the slider).
+        stop_event (threading.Event): Event to signal stopping the loop.
+    """
+    try:
+        with mido.open_output(port_name) as port:
+            print(f"Connected to MIDI output: {port_name}")
+
+            while not stop_event.is_set():
+                for interval, duration in zip(scale_intervals, note_durations):
+                    if stop_event.is_set():
+                        break
+
+                    # Calculate the note to play
+                    note = root_note + interval
+
+                    # Dynamically fetch the current BPM and volume from the sliders
+                    bpm = tempo_var.get()
+                    volume = volume_var.get()
+
+                    # Convert duration (in beats) to seconds
+                    beat_duration = 60 / bpm
+                    note_duration = duration * beat_duration
+
+                    # Send note_on message
+                    msg_on = Message('note_on', note=note, velocity=volume, channel=0)
+                    port.send(msg_on)
+
+                    # Hold the note for the specified duration
+                    time.sleep(note_duration * 0.75)  # Hold for 75% of the duration
+
+                    # Send note_off message
+                    msg_off = Message('note_off', note=note, velocity=volume, channel=0)
+                    port.send(msg_off)
+
+                    # Rest for the remaining 25% of the duration
+                    time.sleep(note_duration * 0.25)
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+def stop_loop():
+    global stop_event, play_thread
+    if stop_event is not None:
+        stop_event.set()
+    if play_thread is not None:
+        play_thread.join()
+
+def start_loop():
+    global stop_event, play_thread
+    stop_event = threading.Event()
+    root_note = int(root_note_entry.get())
+    port_name = midi_port_var.get()
+
+    # Get the selected scale intervals and durations
+    selected_scale = scale_var.get()
+
+    if selected_scale == "12-Bar Blues":
+        play_thread = threading.Thread(target=play_blues, args=(port_name, root_note, blues_intervals, blues_progression, tempo_var, volume_var, stop_event))
+    else:
+        scale_data = scales[selected_scale]
+
+        if isinstance(scale_data, tuple):  # If the scale includes both intervals and durations
+            scale_intervals, note_durations = scale_data
+        else:  # If it's just a list of intervals (e.g., Gypsy, Minor Pentatonic)
+            scale_intervals = scale_data
+            note_durations = [1.0] * len(scale_data)  # Default to uniform durations
+
+        play_thread = threading.Thread(target=play_scale, args=(port_name, root_note, scale_intervals, note_durations, tempo_var, volume_var, stop_event))
+
+    play_thread.start()
+
+# GUI setup
+root = tk.Tk()
+root.title("MIDI Scale Player")
+
+
+tempo_var = tk.IntVar(value=120)
+volume_var = tk.IntVar(value=64)
+scale_var = tk.StringVar(value="Major")
+midi_port_var = tk.StringVar(value=mido.get_output_names()[0])
+
+# Root note entry
+root_note_label = tk.Label(root, text="Root Note (MIDI number):")
+root_note_label.pack()
+root_note_entry = tk.Entry(root)
+root_note_entry.insert(0, "60")  # Default to middle C
+root_note_entry.pack()
+
+# Scale dropdown
+scale_label = tk.Label(root, text="Select Scale:")
+scale_label.pack()
+scale_menu = tk.OptionMenu(root, scale_var, *scales.keys())
+scale_menu.pack()
+
+# MIDI port dropdown
+port_label = tk.Label(root, text="Select MIDI Output Port:")
+port_label.pack()
+port_menu = tk.OptionMenu(root, midi_port_var, *mido.get_output_names())
+port_menu.pack()
+
+# Tempo slider
+tempo_label = tk.Label(root, text="Tempo (BPM):")
+tempo_label.pack()
+tempo_slider = tk.Scale(root, from_=40, to=240, orient=tk.HORIZONTAL, variable=tempo_var)
+tempo_slider.pack()
+
+# Volume slider
+volume_label = tk.Label(root, text="Volume:")
+volume_label.pack()
+volume_slider = tk.Scale(root, from_=0, to=127, orient=tk.HORIZONTAL, variable=volume_var)
+volume_slider.pack()
+
+# Control buttons
+start_button = tk.Button(root, text="Start", command=start_loop)
+start_button.pack()
+
+stop_button = tk.Button(root, text="Stop", command=stop_loop)
+stop_button.pack()
+
+# Main loop
+root.protocol("WM_DELETE_WINDOW", stop_loop)  # Ensure MIDI stops on exit
+root.mainloop()
