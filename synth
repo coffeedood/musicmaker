@@ -1,0 +1,204 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import mido
+import threading
+
+class MIDIKeyboardApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("MIDI Keyboard")
+        
+        # Initialize MIDI variables
+        self.midi_output = None
+        self.output_port_name = tk.StringVar()
+        self.instrument_var = tk.StringVar(value="Acoustic Grand Piano")
+
+        # Create MIDI output selection UI
+        self.create_midi_output_ui()
+
+        # Create instrument selection UI
+        self.create_instrument_selection_ui()
+
+        # Create virtual keyboard UI
+        self.create_virtual_keyboard_ui()
+
+        # Populate output port options
+        self.update_midi_output_ports()
+
+    def create_midi_output_ui(self):
+        frame = tk.Frame(self.root)
+        frame.pack(pady=10)
+
+        tk.Label(frame, text="Select MIDI Output Port:").pack(side=tk.LEFT, padx=5)
+
+        self.output_dropdown = ttk.Combobox(frame, textvariable=self.output_port_name, state="readonly", width=30)
+        self.output_dropdown.pack(side=tk.LEFT, padx=5)
+
+        refresh_button = tk.Button(frame, text="Refresh Ports", command=self.update_midi_output_ports)
+        refresh_button.pack(side=tk.LEFT, padx=5)
+
+        connect_button = tk.Button(frame, text="Connect", command=self.connect_to_midi_output)
+        connect_button.pack(side=tk.LEFT, padx=5)
+
+    def create_instrument_selection_ui(self):
+        frame = tk.Frame(self.root)
+        frame.pack(pady=10)
+
+        tk.Label(frame, text="Select Instrument:").pack(side=tk.LEFT, padx=5)
+
+        instruments = [
+            "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
+            "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavinet", "Celesta", "Glockenspiel",
+            "Music Box", "Vibraphone", "Marimba", "Xylophone", "Tubular Bells", "Dulcimer", "Drawbar Organ",
+            "Percussive Organ", "Rock Organ", "Church Organ", "Reed Organ", "Accordion", "Harmonica", "Tango Accordion",
+            "Acoustic Guitar (nylon)", "Acoustic Guitar (steel)", "Electric Guitar (jazz)", "Electric Guitar (clean)",
+            "Electric Guitar (muted)", "Overdriven Guitar", "Distortion Guitar", "Guitar Harmonics", "Acoustic Bass",
+            "Electric Bass (finger)", "Electric Bass (pick)", "Fretless Bass", "Slap Bass 1", "Slap Bass 2", "Synth Bass 1",
+            "Synth Bass 2", "Violin", "Viola", "Cello", "Contrabass", "Tremolo Strings", "Pizzicato Strings",
+            "Orchestral Harp", "Timpani", "String Ensemble 1", "String Ensemble 2", "Synth Strings 1", "Synth Strings 2",
+            "Choir Aahs", "Voice Oohs", "Synth Voice", "Orchestra Hit", "Trumpet", "Trombone", "Tuba", "Muted Trumpet",
+            "French Horn", "Brass Section", "Synth Brass 1", "Synth Brass 2", "Soprano Sax", "Alto Sax", "Tenor Sax",
+            "Baritone Sax", "Oboe", "English Horn", "Bassoon", "Clarinet", "Piccolo", "Flute", "Recorder", "Pan Flute",
+            "Blown Bottle", "Shakuhachi", "Whistle", "Ocarina", "Lead 1 (square)", "Lead 2 (sawtooth)", "Lead 3 (calliope)",
+            "Lead 4 (chiff)", "Lead 5 (charang)", "Lead 6 (voice)", "Lead 7 (fifths)", "Lead 8 (bass + lead)", "Pad 1 (new age)",
+            "Pad 2 (warm)", "Pad 3 (polysynth)", "Pad 4 (choir)", "Pad 5 (bowed)", "Pad 6 (metallic)", "Pad 7 (halo)",
+            "Pad 8 (sweep)", "FX 1 (rain)", "FX 2 (soundtrack)", "FX 3 (crystal)", "FX 4 (atmosphere)", "FX 5 (brightness)",
+            "FX 6 (goblins)", "FX 7 (echoes)", "FX 8 (scifi)", "Sitar", "Banjo", "Shamisen", "Koto", "Kalimba", "Bagpipe",
+            "Fiddle", "Shanai", "Timpani", "Agogo", "Steel Drums", "Woodblock", "Taiko Drum", "Tom", "Synth Drum",
+            "Reverse Cymbal", "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet", "Telephone Ring", "Helicopter",
+            "Applause", "Gunshot", "Bagpipes", "Steel Drums", "Whistle", "Cymbals", "Tambourine", "Triangle"
+        ]
+
+        self.instrument_dropdown = ttk.Combobox(frame, textvariable=self.instrument_var, state="readonly", values=instruments, width=30)
+        self.instrument_dropdown.pack(side=tk.LEFT, padx=5)
+        self.instrument_dropdown.bind("<<ComboboxSelected>>", self.on_instrument_change)
+
+    def update_midi_output_ports(self):
+        ports = mido.get_output_names()
+        self.output_dropdown["values"] = ports
+        if ports:
+            self.output_port_name.set(ports[0])
+
+    def connect_to_midi_output(self):
+        if self.midi_output:
+            self.midi_output.close()
+
+        selected_port = self.output_port_name.get()
+        if selected_port:
+            try:
+                self.midi_output = mido.open_output(selected_port)
+                messagebox.showinfo("Success", f"Connected to {selected_port}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to connect to {selected_port}: {e}")
+        else:
+            messagebox.showwarning("Warning", "No output port selected.")
+
+    def on_instrument_change(self, event):
+        if self.midi_output:
+            instrument_name = self.instrument_var.get()
+            instrument_index = self.get_instrument_index(instrument_name)
+            self.send_program_change(instrument_index)
+
+    def get_instrument_index(self, instrument_name):
+    # Valid General MIDI instrument mapping (0–127)
+        instrument_map = {
+            "Acoustic Grand Piano": 0, "Bright Acoustic Piano": 1, "Electric Grand Piano": 2, "Honky-tonk Piano": 3,
+            "Electric Piano 1": 4, "Electric Piano 2": 5, "Harpsichord": 6, "Clavinet": 7, "Celesta": 8,
+            "Glockenspiel": 9, "Music Box": 10, "Vibraphone": 11, "Marimba": 12, "Xylophone": 13,
+            "Tubular Bells": 14, "Dulcimer": 15, "Drawbar Organ": 16, "Percussive Organ": 17, "Rock Organ": 18,
+            "Church Organ": 19, "Reed Organ": 20, "Accordion": 21, "Harmonica": 22, "Tango Accordion": 23,
+            "Acoustic Guitar (nylon)": 24, "Acoustic Guitar (steel)": 25, "Electric Guitar (jazz)": 26,
+            "Electric Guitar (clean)": 27, "Electric Guitar (muted)": 28, "Overdriven Guitar": 29,
+            "Distortion Guitar": 30, "Guitar Harmonics": 31, "Acoustic Bass": 32, "Electric Bass (finger)": 33,
+            "Electric Bass (pick)": 34, "Fretless Bass": 35, "Slap Bass 1": 36, "Slap Bass 2": 37,
+            "Synth Bass 1": 38, "Synth Bass 2": 39, "Violin": 40, "Viola": 41, "Cello": 42, "Contrabass": 43,
+            "Tremolo Strings": 44, "Pizzicato Strings": 45, "Orchestral Harp": 46, "Timpani": 47,
+            "String Ensemble 1": 48, "String Ensemble 2": 49, "Synth Strings 1": 50, "Synth Strings 2": 51,
+            "Choir Aahs": 52, "Voice Oohs": 53, "Synth Voice": 54, "Orchestra Hit": 55, "Trumpet": 56,
+            "Trombone": 57, "Tuba": 58, "Muted Trumpet": 59, "French Horn": 60, "Brass Section": 61,
+            "Synth Brass 1": 62, "Synth Brass 2": 63, "Soprano Sax": 64, "Alto Sax": 65, "Tenor Sax": 66,
+            "Baritone Sax": 67, "Oboe": 68, "English Horn": 69, "Bassoon": 70, "Clarinet": 71, "Piccolo": 72,
+            "Flute": 73, "Recorder": 74, "Pan Flute": 75, "Blown Bottle": 76, "Shakuhachi": 77, "Whistle": 78,
+            "Ocarina": 79, "Lead 1 (square)": 80, "Lead 2 (sawtooth)": 81, "Lead 3 (calliope)": 82,
+            "Lead 4 (chiff)": 83, "Lead 5 (charang)": 84, "Lead 6 (voice)": 85, "Lead 7 (fifths)": 86,
+            "Lead 8 (bass + lead)": 87, "Pad 1 (new age)": 88, "Pad 2 (warm)": 89, "Pad 3 (polysynth)": 90,
+            "Pad 4 (choir)": 91, "Pad 5 (bowed)": 92, "Pad 6 (metallic)": 93, "Pad 7 (halo)": 94,
+            "Pad 8 (sweep)": 95, "FX 1 (rain)": 96, "FX 2 (soundtrack)": 97, "FX 3 (crystal)": 98,
+            "FX 4 (atmosphere)": 99, "FX 5 (brightness)": 100, "FX 6 (goblins)": 101, "FX 7 (echoes)": 102,
+            "FX 8 (sci-fi)": 103, "Sitar": 104, "Banjo": 105, "Shamisen": 106, "Koto": 107, "Kalimba": 108,
+            "Bagpipe": 109, "Fiddle": 110, "Shanai": 111, "Tinkle Bell": 112, "Agogo": 113, "Steel Drums": 114,
+            "Woodblock": 115, "Taiko Drum": 116, "Melodic Tom": 117, "Synth Drum": 118, "Reverse Cymbal": 119,
+            "Guitar Fret Noise": 120, "Breath Noise": 121, "Seashore": 122, "Bird Tweet": 123, "Telephone Ring": 124,
+            "Helicopter": 125, "Applause": 126, "Gunshot": 127
+        }
+
+        # Return the valid instrument program number or a default of 0
+        return instrument_map.get(instrument_name, 0)
+
+
+
+    def send_program_change(self, program_number):
+        if self.midi_output:
+            try:
+                # Send the program change message (this selects the instrument)
+                self.midi_output.send(mido.Message('program_change', program=program_number))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to send Program Change message: {e}")
+
+    def create_virtual_keyboard_ui(self):
+        keyboard_frame = tk.Frame(self.root)
+        keyboard_frame.pack(pady=20)
+
+        # Define white and black keys for the virtual keyboard
+        white_keys = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+        black_keys = ['C#', 'D#', '', 'F#', 'G#', 'A#', '']
+
+        start_note = 0
+        end_note = 127
+        white_key_width = 4
+        black_key_width = 3
+
+        row = 0
+        column = 0
+
+        for note in range(start_note, end_note + 1):
+            octave = (note // 12) - 1
+            note_in_octave = note % 12
+
+            if note_in_octave in [0, 2, 4, 5, 7, 9, 11]:  # White keys
+                key_label = white_keys[[0, 2, 4, 5, 7, 9, 11].index(note_in_octave)] + str(octave)
+                button = tk.Button(keyboard_frame, text=key_label, width=white_key_width, height=10, bg="white")
+                button.grid(row=row, column=column, padx=1, pady=1)
+                column += 1
+            elif column > 0:  # Black keys
+                key_label = black_keys[[1, 3, 6, 8, 10].index(note_in_octave)] + str(octave)
+                button = tk.Button(keyboard_frame, text=key_label, width=black_key_width, height=6, bg="black", fg="white")
+                button.grid(row=row, column=column - 1, padx=(10, 0), pady=1, sticky="n")
+
+            # Bind button press and release events
+            button.bind("<ButtonPress-1>", lambda event, n=note: self.note_on(n))
+            button.bind("<ButtonRelease-1>", lambda event, n=note: self.note_off(n))
+
+            # Start a new row if the current row is filled with white keys
+            if column > 10 and note_in_octave in [0, 2, 4, 5, 7, 9, 11]:
+                row += 1
+                column = 0
+
+    def note_on(self, note):
+        if self.midi_output:
+            try:
+                self.midi_output.send(mido.Message('note_on', note=note, velocity=64))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to send note_on message: {e}")
+
+    def note_off(self, note):
+        if self.midi_output:
+            try:
+                self.midi_output.send(mido.Message('note_off', note=note))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to send note_off message: {e}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = MIDIKeyboardApp(root)
+    root.mainloop()
