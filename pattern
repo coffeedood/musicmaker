@@ -1,0 +1,179 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import mido
+import threading
+import time
+
+class MIDIKeyboardApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("MIDI Keyboard")
+
+        # Initialize MIDI variables
+        self.midi_output = None
+        self.output_port_name = tk.StringVar()
+        self.instrument_var = tk.StringVar(value="Acoustic Grand Piano")
+
+        # Sequence playback variables
+        self.is_playing = False
+        self.sequence_thread = None
+        self.note_sequence = []
+        self.note_duration = tk.DoubleVar(value=0.5)  # Default duration of 0.5 seconds per note
+
+        # Create UI elements
+        self.create_midi_output_ui()
+        self.create_instrument_selection_ui()
+        self.create_sequence_ui()
+        self.create_control_buttons()
+
+        # Populate output port options
+        self.update_midi_output_ports()
+
+    def create_midi_output_ui(self):
+        frame = tk.Frame(self.root)
+        frame.pack(pady=10)
+
+        tk.Label(frame, text="Select MIDI Output Port:").pack(side=tk.LEFT, padx=5)
+
+        self.output_dropdown = ttk.Combobox(frame, textvariable=self.output_port_name, state="readonly", width=30)
+        self.output_dropdown.pack(side=tk.LEFT, padx=5)
+
+        refresh_button = tk.Button(frame, text="Refresh Ports", command=self.update_midi_output_ports)
+        refresh_button.pack(side=tk.LEFT, padx=5)
+
+        connect_button = tk.Button(frame, text="Connect", command=self.connect_to_midi_output)
+        connect_button.pack(side=tk.LEFT, padx=5)
+
+    def create_instrument_selection_ui(self):
+        frame = tk.Frame(self.root)
+        frame.pack(pady=10)
+
+        tk.Label(frame, text="Select Instrument:").pack(side=tk.LEFT, padx=5)
+
+        instruments = [
+            "Acoustic Grand Piano", "Electric Piano 1", "Electric Guitar (clean)", "Violin",
+            "Trumpet", "Flute", "Synth Bass 1", "Synth Strings 1", "Pad 2 (warm)"
+        ]
+
+        self.instrument_dropdown = ttk.Combobox(frame, textvariable=self.instrument_var, state="readonly", values=instruments, width=30)
+        self.instrument_dropdown.pack(side=tk.LEFT, padx=5)
+        self.instrument_dropdown.bind("<<ComboboxSelected>>", self.on_instrument_change)
+
+    def create_sequence_ui(self):
+        frame = tk.Frame(self.root)
+        frame.pack(pady=10)
+
+        tk.Label(frame, text="Note Sequence (e.g., C4,D4,E4):").pack(side=tk.LEFT, padx=5)
+
+        self.sequence_entry = tk.Entry(frame, width=30)
+        self.sequence_entry.pack(side=tk.LEFT, padx=5)
+
+        tk.Label(frame, text="Note Duration (seconds):").pack(side=tk.LEFT, padx=5)
+
+        duration_entry = tk.Entry(frame, textvariable=self.note_duration, width=5)
+        duration_entry.pack(side=tk.LEFT, padx=5)
+
+    def create_control_buttons(self):
+        frame = tk.Frame(self.root)
+        frame.pack(pady=10)
+
+        start_button = tk.Button(frame, text="Start Sequence", command=self.start_sequence_loop)
+        start_button.pack(side=tk.LEFT, padx=5)
+
+        stop_button = tk.Button(frame, text="Stop Sequence", command=self.stop_sequence_loop)
+        stop_button.pack(side=tk.LEFT, padx=5)
+
+    def update_midi_output_ports(self):
+        ports = mido.get_output_names()
+        self.output_dropdown["values"] = ports
+        if ports:
+            self.output_port_name.set(ports[0])
+
+    def connect_to_midi_output(self):
+        if self.midi_output:
+            self.midi_output.close()
+
+        selected_port = self.output_port_name.get()
+        if selected_port:
+            try:
+                self.midi_output = mido.open_output(selected_port)
+                messagebox.showinfo("Success", f"Connected to {selected_port}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to connect to {selected_port}: {e}")
+        else:
+            messagebox.showwarning("Warning", "No output port selected.")
+
+    def on_instrument_change(self, event):
+        if self.midi_output:
+            instrument_name = self.instrument_var.get()
+            instrument_index = self.get_instrument_index(instrument_name)
+            self.send_program_change(instrument_index)
+
+    def get_instrument_index(self, instrument_name):
+        instrument_map = {
+            "Acoustic Grand Piano": 0, "Electric Piano 1": 4, "Electric Guitar (clean)": 27, "Violin": 40,
+            "Trumpet": 56, "Flute": 73, "Synth Bass 1": 38, "Synth Strings 1": 50, "Pad 2 (warm)": 89
+        }
+        return instrument_map.get(instrument_name, 0)
+
+    def send_program_change(self, instrument_index):
+        if self.midi_output:
+            msg = mido.Message('program_change', program=instrument_index)
+            self.midi_output.send(msg)
+
+    def parse_note_sequence(self):
+        note_map = {
+            "C": 60, "C#": 61, "D": 62, "D#": 63, "E": 64, "F": 65, "F#": 66, "G": 67, "G#": 68, "A": 69, "A#": 70, "B": 71
+        }
+        sequence = self.sequence_entry.get().split(",")
+        midi_notes = []
+        for note in sequence:
+            if len(note) < 2:
+                continue
+            pitch = note[:-1].upper()
+            octave = int(note[-1])
+            if pitch in note_map:
+                midi_note = note_map[pitch] + (octave - 4) * 12
+                midi_notes.append(midi_note)
+        return midi_notes
+
+    def play_sequence(self):
+        self.note_sequence = self.parse_note_sequence()
+        if not self.note_sequence:
+            messagebox.showwarning("Warning", "No valid notes found in sequence.")
+            return
+
+        while self.is_playing:
+            for note in self.note_sequence:
+                if not self.is_playing:
+                    break
+                self.send_note_on(note)
+                time.sleep(self.note_duration.get())
+                self.send_note_off(note)
+
+    def send_note_on(self, note):
+        if self.midi_output:
+            msg = mido.Message('note_on', note=note, velocity=64)
+            self.midi_output.send(msg)
+
+    def send_note_off(self, note):
+        if self.midi_output:
+            msg = mido.Message('note_off', note=note, velocity=64)
+            self.midi_output.send(msg)
+
+    def start_sequence_loop(self):
+        if not self.is_playing:
+            self.is_playing = True
+            self.sequence_thread = threading.Thread(target=self.play_sequence, daemon=True)
+            self.sequence_thread.start()
+
+    def stop_sequence_loop(self):
+        self.is_playing = False
+        if self.sequence_thread:
+            self.sequence_thread.join()
+            self.sequence_thread = None
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = MIDIKeyboardApp(root)
+    root.mainloop()
