@@ -1,0 +1,156 @@
+import mido
+from mido import Message
+import time
+import threading
+import tkinter as tk
+from tkinter import ttk
+import pygame.midi
+
+def list_midi_ports():
+    """List available MIDI output ports using pygame.midi."""
+    pygame.midi.init()  # Initialize pygame.midi
+    port_count = pygame.midi.get_count()
+    ports = []
+    for i in range(port_count):
+        if pygame.midi.get_device_info(i)[3]:  # Check if the port is an output port
+            ports.append(pygame.midi.get_device_info(i)[1].decode())
+    pygame.midi.quit()  # Clean up pygame.midi
+    return ports
+
+def play_scale(port_name, root_note, scale_intervals, tempo_var, stop_event):
+    """
+    Play a looping scale on the specified MIDI port.
+
+    Args:
+        port_name (str): The name of the MIDI output port.
+        root_note (int): The MIDI number of the root note (e.g., 60 for middle C).
+        scale_intervals (list): The intervals (in semitones) of the scale.
+        tempo_var (tk.IntVar): The tempo variable (linked to the slider).
+        stop_event (threading.Event): Event to signal stopping the loop.
+    """
+    try:
+        pygame.midi.init()  # Initialize pygame.midi
+        output_id = None
+        port_count = pygame.midi.get_count()
+        
+        # Find the matching port
+        for i in range(port_count):
+            port_info = pygame.midi.get_device_info(i)
+            if port_info[1].decode() == port_name and port_info[3]:
+                output_id = i
+                break
+
+        if output_id is None:
+            print(f"Error: Could not find MIDI output port named {port_name}")
+            pygame.midi.quit()
+            return
+        
+        midi_out = pygame.midi.Output(output_id)
+
+        print(f"Connected to MIDI output: {port_name}")
+
+        # Generate the scale notes starting from the root note
+        scale_notes = [root_note + interval for interval in scale_intervals]
+
+        # Play the scale in a loop
+        while not stop_event.is_set():
+            notes = scale_notes + scale_notes[::-1]
+
+            for note in notes:
+                if stop_event.is_set():
+                    break
+
+                # Dynamically fetch the current BPM from the slider
+                bpm = tempo_var.get()
+                beat_duration = 60 / bpm
+
+                # Send note_on message
+                midi_out.note_on(note, velocity=64)
+
+                # Hold the note for its duration
+                time.sleep(beat_duration * 0.75)  # Hold each note for 3/4 of a beat
+
+                # Send note_off message
+                midi_out.note_off(note)
+
+                # Add a slight pause between notes for clarity
+                time.sleep(beat_duration * 0.1)
+
+        midi_out.close()  # Close the midi output
+        pygame.midi.quit()  # Clean up pygame.midi
+
+    except Exception as e:
+        print(f"Error: {e}")
+        pygame.midi.quit()  # Ensure cleanup in case of error
+
+def start_loop():
+    global stop_event, play_thread
+    stop_event = threading.Event()
+    root_note = int(root_note_entry.get())
+    port_name = midi_port_var.get()
+
+    # Get the selected scale intervals
+    selected_scale = scale_var.get()
+    scale_intervals = scales[selected_scale]
+
+    play_thread = threading.Thread(target=play_scale, args=(port_name, root_note, scale_intervals, tempo_var, stop_event))
+    play_thread.start()
+
+def stop_loop():
+    global stop_event, play_thread
+    if stop_event:
+        stop_event.set()
+    if play_thread:
+        play_thread.join()
+
+def update_tempo(value):
+    tempo_var.set(int(value))
+
+if __name__ == "__main__":
+    # MIDI setup
+    midi_ports = list_midi_ports()
+
+    if not midi_ports:
+        print("No MIDI ports available.")
+        exit()
+
+    # Define scales with their intervals
+    scales = {
+        "Gypsy": [0, 2, 3, 6, 7, 8, 11, 12],
+        "Minor Pentatonic": [0, 3, 5, 7, 10, 12],
+        "Major": [0, 2, 4, 5, 7, 9, 11, 12],
+        "Minor": [0, 2, 3, 5, 7, 8, 10, 12]
+    }
+
+    # Tkinter GUI setup
+    root = tk.Tk()
+    root.title("Scale Player")
+
+    tk.Label(root, text="Select MIDI Output:").pack(pady=5)
+    midi_port_var = tk.StringVar(value=midi_ports[0])
+    midi_port_menu = ttk.Combobox(root, values=midi_ports, textvariable=midi_port_var, state="readonly")
+    midi_port_menu.pack(pady=5)
+
+    tk.Label(root, text="Root Note (MIDI Number):").pack(pady=5)
+    root_note_entry = tk.Entry(root)
+    root_note_entry.insert(0, "60")  # Default to middle C
+    root_note_entry.pack(pady=5)
+
+    tk.Label(root, text="Select Scale:").pack(pady=5)
+    scale_var = tk.StringVar(value="Gypsy")
+    scale_menu = ttk.Combobox(root, values=list(scales.keys()), textvariable=scale_var, state="readonly")
+    scale_menu.pack(pady=5)
+
+    tk.Label(root, text="Tempo (BPM):").pack(pady=5)
+    tempo_var = tk.IntVar(value=120)
+    tempo_slider = tk.Scale(root, from_=30, to=300, orient="horizontal", variable=tempo_var, command=update_tempo)
+    tempo_slider.pack(pady=5)
+
+    start_button = tk.Button(root, text="Start", command=start_loop)
+    start_button.pack(pady=5)
+
+    stop_button = tk.Button(root, text="Stop", command=stop_loop)
+    stop_button.pack(pady=5)
+
+    root.protocol("WM_DELETE_WINDOW", lambda: (stop_loop(), root.destroy()))
+    root.mainloop()
