@@ -1,0 +1,167 @@
+import pygame
+import threading
+import time
+from mido import Message, open_output
+import mido
+
+# Initialize Pygame
+pygame.init()
+
+# Screen dimensions
+WIDTH, HEIGHT = 600, 400
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("MIDI Scale Player")
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GRAY = (200, 200, 200)
+BLUE = (0, 0, 255)
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+
+# Fonts
+FONT = pygame.font.Font(None, 32)
+
+# Predefined scales
+scales = {
+    "Gypsy": [0, 2, 3, 6, 7, 8, 11, 12],
+    "Minor Pentatonic": [0, 3, 5, 7, 10, 12],
+    "Major": [0, 2, 4, 5, 7, 9, 11, 12],
+    "Minor": [0, 2, 3, 5, 7, 8, 10, 12],
+    "Chromatic": list(range(13)),  # Chromatic scale includes all 12 semitones
+}
+
+# Global variables
+tempo = 120
+volume = 64
+root_note = 60
+selected_scale = "Major"
+midi_ports = mido.get_output_names()
+selected_port = midi_ports[0] if midi_ports else None
+stop_event = threading.Event()
+play_thread = None
+
+def draw_text(text, x, y, color=BLACK):
+    label = FONT.render(text, True, color)
+    screen.blit(label, (x, y))
+
+def draw_button(text, rect, color, hover_color, mouse_pos):
+    if rect.collidepoint(mouse_pos):
+        pygame.draw.rect(screen, hover_color, rect)
+    else:
+        pygame.draw.rect(screen, color, rect)
+    draw_text(text, rect.x + 10, rect.y + 10, BLACK)
+
+def play_scale(port_name, root_note, scale_intervals, tempo, volume, stop_event):
+    """
+    Play a scale using the MIDI port.
+    """
+    try:
+        with open_output(port_name) as port:
+            print(f"Connected to MIDI output: {port_name}")
+
+            while not stop_event.is_set():
+                for interval in scale_intervals:
+                    if stop_event.is_set():
+                        break
+
+                    note = root_note + interval
+                    beat_duration = 60 / tempo
+
+                    # Send note_on message
+                    msg_on = Message('note_on', note=note, velocity=volume, channel=0)
+                    port.send(msg_on)
+
+                    # Hold the note
+                    time.sleep(beat_duration * 0.75)
+
+                    # Send note_off message
+                    msg_off = Message('note_off', note=note, velocity=volume, channel=0)
+                    port.send(msg_off)
+
+                    # Rest
+                    time.sleep(beat_duration * 0.25)
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+def start_loop():
+    global stop_event, play_thread
+
+    if not selected_port:
+        print("No MIDI port selected!")
+        return
+
+    stop_event.clear()
+    scale_intervals = scales[selected_scale]
+
+    play_thread = threading.Thread(
+        target=play_scale,
+        args=(selected_port, root_note, scale_intervals, tempo, volume, stop_event),
+    )
+    play_thread.start()
+
+def stop_loop():
+    global stop_event, play_thread
+
+    if stop_event:
+        stop_event.set()
+    if play_thread:
+        play_thread.join()
+
+# Pygame main loop
+running = True
+while running:
+    screen.fill(WHITE)
+    mouse_pos = pygame.mouse.get_pos()
+
+    # Draw GUI elements
+    draw_text("Root Note (60 = Middle C):", 20, 20)
+    draw_text(f"{root_note}", 220, 20)
+
+    draw_text("Tempo (BPM):", 20, 60)
+    draw_text(f"{tempo}", 220, 60)
+
+    draw_text("Volume:", 20, 100)
+    draw_text(f"{volume}", 220, 100)
+
+    draw_text("Select Scale:", 20, 140)
+    draw_text(selected_scale, 220, 140)
+
+    draw_text("Select MIDI Port:", 20, 180)
+    draw_text(selected_port if selected_port else "No Port", 220, 180)
+
+    # Buttons
+    start_button = pygame.Rect(20, 240, 120, 40)
+    stop_button = pygame.Rect(160, 240, 120, 40)
+    draw_button("Start", start_button, GREEN, GRAY, mouse_pos)
+    draw_button("Stop", stop_button, RED, GRAY, mouse_pos)
+
+    # Handle events
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if start_button.collidepoint(event.pos):
+                start_loop()
+            elif stop_button.collidepoint(event.pos):
+                stop_loop()
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_UP:
+                tempo += 1
+            elif event.key == pygame.K_DOWN:
+                tempo -= 1
+            elif event.key == pygame.K_RIGHT:
+                volume = min(volume + 1, 127)
+            elif event.key == pygame.K_LEFT:
+                volume = max(volume - 1, 0)
+            elif event.key == pygame.K_s:
+                selected_scale = list(scales.keys())[(list(scales.keys()).index(selected_scale) + 1) % len(scales)]
+
+    pygame.display.flip()
+
+pygame.quit()
+stop_loop()
